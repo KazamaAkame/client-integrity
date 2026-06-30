@@ -1,0 +1,9 @@
+.gradle/
+.agents/
+.codex/
+.idea/
+*.iml
+build/
+run/
+*.log
+*.tmp
