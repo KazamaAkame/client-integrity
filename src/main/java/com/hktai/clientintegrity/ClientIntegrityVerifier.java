@@ -1,6 +1,7 @@
 package com.hktai.clientintegrity;
 
 import com.hktai.clientintegrity.network.ChallengePayload;
+import com.hktai.clientintegrity.network.ReadyPayload;
 import com.hktai.clientintegrity.network.ResponsePayload;
 import com.hktai.clientintegrity.rule.ModFinding;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
@@ -64,13 +65,50 @@ public final class ClientIntegrityVerifier {
 			}
 
 			if (!state.verified() && !state.challengeSent() && state.ageTicks() >= ClientIntegrityConfig.timeoutTicks()) {
-				kick(player, "This server requires the Client Integrity verifier mod.",
-						"client never advertised the client_integrity:challenge channel");
+				if (state.clientReady()) {
+					kick(player, "Client Integrity verifier could not complete the server challenge. Please update the verifier mod.",
+							"client ready payload did not cover configured banned mods: " + String.join(",", ClientIntegrityConfig.bannedModIds()));
+				} else {
+					kick(player, "This server requires the Client Integrity verifier mod.",
+							"client never advertised the client_integrity:challenge channel or sent a ready payload");
+				}
 			} else if (!state.verified() && state.challengeSent()
 					&& state.ticksSinceChallenge() >= ClientIntegrityConfig.responseTimeoutTicks()) {
 				kick(player, "Client Integrity verifier did not respond. Please restart Minecraft and try again.",
 						"challenge was sent but no valid response arrived");
 			}
+		}
+	}
+
+	public static void onReady(ServerPlayer player, ReadyPayload payload) {
+		if (!ClientIntegrityConfig.enforce()) {
+			return;
+		}
+
+		CheckState state = STATES.computeIfAbsent(player.getUUID(), uuid -> CheckState.pending(player.getScoreboardName(), RANDOM.nextLong()));
+		if (state.verified()) {
+			return;
+		}
+
+		ClientIntegrityLog.info("Received client integrity ready from " + player.getScoreboardName()
+				+ " using verifier " + payload.verifierVersion()
+				+ " after checking " + String.join(",", payload.checkedModIds()) + ".");
+
+		if (payload.protocolVersion() != ClientIntegrityMod.PROTOCOL_VERSION) {
+			kick(player, "Client integrity verification failed. Please update your verifier mod.", "ready protocol mismatch");
+			return;
+		}
+
+		if (!payload.findings().isEmpty()) {
+			kick(player, blockedMessage(payload.findings()), "ready blocked findings: " + describeFindings(payload.findings()));
+			return;
+		}
+
+		state.markClientReady(payload.verifierVersion(), payload.checkedModIds());
+		if (readyCoversConfiguredBannedMods(payload.checkedModIds())) {
+			state.markVerified(payload.verifierVersion() + " ready");
+			ClientIntegrityLog.info(player.getScoreboardName() + " passed client integrity ready verification with verifier "
+					+ payload.verifierVersion() + ".");
 		}
 	}
 
@@ -135,6 +173,10 @@ public final class ClientIntegrityVerifier {
 				.orElse("none");
 	}
 
+	private static boolean readyCoversConfiguredBannedMods(List<String> checkedModIds) {
+		return checkedModIds.containsAll(ClientIntegrityConfig.bannedModIds());
+	}
+
 	private static void kick(ServerPlayer player, String message, String detail) {
 		ClientIntegrityLog.warn("Kicking " + player.getScoreboardName() + ": " + message + " (" + detail + ")");
 		player.connection.disconnect(Component.literal(message));
@@ -148,8 +190,10 @@ public final class ClientIntegrityVerifier {
 		private int challengeSentAtTicks = -1;
 		private boolean challengeSent;
 		private boolean channelReady;
+		private boolean clientReady;
 		private boolean verified;
 		private String verifierVersion;
+		private List<String> readyCheckedModIds = List.of();
 
 		private CheckState(String playerName, long nonce, boolean verified, String verifierVersion) {
 			this.playerName = playerName;
@@ -190,6 +234,14 @@ public final class ClientIntegrityVerifier {
 			return channelReady;
 		}
 
+		public boolean clientReady() {
+			return clientReady;
+		}
+
+		public List<String> readyCheckedModIds() {
+			return readyCheckedModIds;
+		}
+
 		public boolean verified() {
 			return verified;
 		}
@@ -209,6 +261,12 @@ public final class ClientIntegrityVerifier {
 
 		private void markChannelReady(boolean channelReady) {
 			this.channelReady = this.channelReady || channelReady;
+		}
+
+		private void markClientReady(String verifierVersion, List<String> checkedModIds) {
+			clientReady = true;
+			this.verifierVersion = verifierVersion;
+			readyCheckedModIds = List.copyOf(checkedModIds);
 		}
 
 		private void markVerified(String verifierVersion) {

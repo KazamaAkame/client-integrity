@@ -16,7 +16,7 @@ public final class ClientIntegrityConfig {
 	private static final List<String> DEFAULT_BANNED_MODS = List.of("seedcrackerx");
 
 	private static boolean enforce = true;
-	private static int timeoutTicks = 60;
+	private static int timeoutTicks = 300;
 	private static int responseTimeoutTicks = 200;
 	private static List<String> bannedModIds = DEFAULT_BANNED_MODS;
 	private static boolean logPassedPlayers = false;

@@ -78,6 +78,8 @@ public final class ClientIntegrityCommand {
 		}
 		return state.playerName()
 				+ ": pending, channelReady=" + state.channelReady()
+				+ ", clientReady=" + state.clientReady()
+				+ ", readyChecked=" + String.join(",", state.readyCheckedModIds())
 				+ ", challengeSent=" + state.challengeSent()
 				+ ", ageTicks=" + state.ageTicks();
 	}
